@@ -9,7 +9,7 @@ TICKERS = [
     "SOFI", "PLTR", "RIVN", "LCID", "OPEN",
     "F", "NIO", "GRAB", "HOOD", "SNAP",
     "RKLB", "IONQ", "ASTS", "DNA", "BBAI",
-    "SMCI", "APLD", "SGML", "SNDK"
+    "SMCI", "APLD", "SGML", "SNDK", "KVYO"
 ]
 
 
