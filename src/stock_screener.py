@@ -52,39 +52,114 @@ def get_stock_data(ticker: str) -> dict | None:
         return None
 
 
-def calculate_score(row: pd.Series) -> float:
+def clamp(value: float, min_value: float = 0, max_value: float = 100) -> float:
+    return max(min_value, min(value, max_value))
+
+
+def calculate_score(row: pd.Series) -> pd.Series:
     """
-    Simple first-version scoring model.
-    This is not a trading signal yet.
-    It only ranks candidates.
+    Improved multi-factor scoring model.
+    Returns separate component scores and a final growth score.
     """
 
-    score = 0
+    # 1. Momentum Score
+    # Positive 30D return is good, but extreme moves are capped.
+    return_30d = row["return_30d_pct"]
 
-    # Price rule
-    if row["latest_price"] < 30:
-        score += 25
+    if pd.isna(return_30d):
+        momentum_score = 0
+    else:
+        momentum_score = clamp((return_30d + 10) * 3)
+        # Example:
+        # -10% return = 0
+        # 0% return = 30
+        # 10% return = 60
+        # 20% return = 90
 
-    # Momentum rule
-    if row["return_30d_pct"] > 0:
-        score += 25
-    if row["return_30d_pct"] > 10:
-        score += 10
+    # 2. Volume Score
+    avg_volume = row["avg_volume_30d"]
+    volume_spike = row["volume_spike"]
 
-    # Volume confirmation
-    if row["avg_volume_30d"] > 500_000:
-        score += 20
+    volume_score = 0
 
-    # Volume spike
-    if row["volume_spike"] > 1.2:
-        score += 10
+    if avg_volume >= 500_000:
+        volume_score += 50
+    elif avg_volume >= 250_000:
+        volume_score += 30
+    elif avg_volume >= 100_000:
+        volume_score += 15
 
-    # Risk penalty
-    if row["volatility_30d_pct"] > 5:
-        score -= 10
+    if volume_spike >= 2:
+        volume_score += 40
+    elif volume_spike >= 1.5:
+        volume_score += 30
+    elif volume_spike >= 1.2:
+        volume_score += 20
+    elif volume_spike >= 1:
+        volume_score += 10
 
-    return round(score, 2)
+    volume_score = clamp(volume_score)
 
+    # 3. Price Opportunity Score
+    # Stocks below $30 qualify, but very low-priced stocks are riskier.
+    price = row["latest_price"]
+
+    if price <= 0:
+        price_score = 0
+    elif price < 5:
+        price_score = 40
+    elif price < 10:
+        price_score = 75
+    elif price < 20:
+        price_score = 90
+    elif price < 30:
+        price_score = 80
+    else:
+        price_score = 0
+
+    # 4. Risk Score
+    # Lower volatility gets better score.
+    volatility = row["volatility_30d_pct"]
+
+    if pd.isna(volatility):
+        risk_score = 0
+    elif volatility <= 2:
+        risk_score = 100
+    elif volatility <= 3:
+        risk_score = 85
+    elif volatility <= 5:
+        risk_score = 65
+    elif volatility <= 8:
+        risk_score = 40
+    else:
+        risk_score = 20
+
+    # Final weighted score
+    final_score = (
+        0.40 * momentum_score +
+        0.25 * volume_score +
+        0.20 * price_score +
+        0.15 * risk_score
+    )
+
+    return pd.Series({
+        "momentum_score": round(momentum_score, 2),
+        "volume_score": round(volume_score, 2),
+        "price_score": round(price_score, 2),
+        "risk_score": round(risk_score, 2),
+        "growth_score": round(final_score, 2),
+    })
+
+
+def assign_decision(score):
+    if score >= 80:
+        return "Strong Watch"
+    elif score >= 65:
+        return "Watch"
+    elif score >= 50:
+        return "Weak Watch"
+    else:
+        return "Ignore"
 
 def run_screener():
     results = []
@@ -106,10 +181,12 @@ def run_screener():
     df = df[df["latest_price"] < 50].copy()
 
     # Score stocks
-    df["growth_score"] = df.apply(calculate_score, axis=1)
+    score_columns = df.apply(calculate_score, axis=1)
+    df = pd.concat([df, score_columns], axis=1)
 
     # Sort by score
     df = df.sort_values(by="growth_score", ascending=False)
+    df["decision"] = df["growth_score"].apply(assign_decision)
 
     # Save output
     today = datetime.now().strftime("%Y-%m-%d")
@@ -127,6 +204,7 @@ def run_screener():
     print(df)
 
     print(f"\nSaved results to: {output_path}")
+
 
 
 if __name__ == "__main__":

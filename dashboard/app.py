@@ -39,6 +39,21 @@ def get_price_history(ticker: str):
     hist = hist.reset_index()
     return hist
 
+display_columns = [
+    "ticker",
+    "latest_price",
+    "return_30d_pct",
+    "avg_volume_30d",
+    "volume_spike",
+    "volatility_30d_pct",
+    "momentum_score",
+    "volume_score",
+    "price_score",
+    "risk_score",
+    "growth_score",
+    "decision",
+]
+
 
 latest_csv = get_latest_csv()
 
@@ -106,7 +121,7 @@ else:
     filtered_df = filtered_df.sort_values(by="growth_score", ascending=False)
 
     st.dataframe(
-        filtered_df,
+        filtered_df[display_columns],
         use_container_width=True,
         hide_index=True
     )
