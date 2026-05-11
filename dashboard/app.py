@@ -1,193 +1,310 @@
-from pathlib import Path
-import pandas as pd
 import streamlit as st
-import yfinance as yf
+import pandas as pd
+from pathlib import Path
+import plotly.express as px
+
+
+st.set_page_config(
+    page_title="Quant Stock Screener",
+    page_icon="📈",
+    layout="wide"
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 
 
-st.set_page_config(
-    page_title="Trading Bot Screener",
-    page_icon="📈",
-    layout="wide"
-)
+def get_latest_screener_file():
+    files = list(DATA_DIR.glob("stock_screener_*.csv"))
 
-
-st.title("📈 Under-$30 Stock Screener")
-st.write("Day 2 dashboard for your AI-assisted trading bot project.")
-
-
-def get_latest_csv():
-    csv_files = list(DATA_DIR.glob("stock_screener_*.csv"))
-
-    if not csv_files:
+    if not files:
         return None
 
-    latest_file = max(csv_files, key=lambda file: file.stat().st_mtime)
+    latest_file = max(files, key=lambda file: file.stat().st_mtime)
     return latest_file
 
-@st.cache_data(ttl=3600)
-def get_price_history(ticker: str):
-    stock = yf.Ticker(ticker)
-    hist = stock.history(period="6mo")
 
-    if hist.empty:
-        return None
+def load_data():
+    latest_file = get_latest_screener_file()
 
-    hist = hist.reset_index()
-    return hist
+    if latest_file is None:
+        return None, None
 
-display_columns = [
+    df = pd.read_csv(latest_file)
+    return df, latest_file
+
+
+def style_setup_type(setup_type):
+    if setup_type == "Momentum":
+        return "🚀 Momentum"
+    elif setup_type == "Reversal":
+        return "🔄 Reversal"
+    else:
+        return "⚪ Neutral"
+
+
+def style_decision(decision):
+    if decision == "Strong Watch":
+        return "🔥 Strong Watch"
+    elif decision == "Watch":
+        return "👀 Watch"
+    elif decision == "Weak Watch":
+        return "⚠️ Weak Watch"
+    else:
+        return "❌ Ignore"
+
+
+df, latest_file = load_data()
+
+st.title("📈 Quant Stock Screener Dashboard")
+
+if df is None:
+    st.error("No screener CSV found. Run your screener first.")
+    st.stop()
+
+st.caption(f"Loaded file: `{latest_file.name}`")
+
+required_columns = [
     "ticker",
     "latest_price",
     "return_30d_pct",
-    "sma_20",
-    "sma_50",
+    "volume_spike",
+    "volatility_30d_pct",
     "rsi_14",
-    "technical_score",
-    "momentum_score",
-    "volume_score",
-    "risk_score",
     "growth_score",
+    "reversal_score",
+    "setup_score",
+    "setup_type",
     "decision",
     "reason",
-    "risk_note",
+    "risk_note"
 ]
 
+missing_columns = [col for col in required_columns if col not in df.columns]
 
-latest_csv = get_latest_csv()
-
-if latest_csv is None:
-    st.warning("No screener CSV found. Run `python src/stock_screener.py` first.")
+if missing_columns:
+    st.error("Your CSV is missing these columns:")
+    st.write(missing_columns)
+    st.info("Run the updated screener with reversal_score and setup_score first.")
     st.stop()
 
 
-df = pd.read_csv(latest_csv)
+# Clean display labels
+df["setup_label"] = df["setup_type"].apply(style_setup_type)
+df["decision_label"] = df["decision"].apply(style_decision)
 
-st.caption(f"Loaded file: `{latest_csv.name}`")
+# Sort by new master score
+df = df.sort_values(by="setup_score", ascending=False)
 
 
-# Sidebar filters
+# =========================
+# SIDEBAR FILTERS
+# =========================
+
 st.sidebar.header("Filters")
 
+setup_filter = st.sidebar.multiselect(
+    "Setup Type",
+    options=sorted(df["setup_type"].unique()),
+    default=sorted(df["setup_type"].unique())
+)
+
+decision_filter = st.sidebar.multiselect(
+    "Decision",
+    options=sorted(df["decision"].unique()),
+    default=sorted(df["decision"].unique())
+)
+
 min_score = st.sidebar.slider(
-    "Minimum Growth Score",
+    "Minimum Setup Score",
     min_value=0,
     max_value=100,
     value=50
 )
 
-max_price = st.sidebar.slider(
-    "Maximum Stock Price",
-    min_value=1,
-    max_value=30,
-    value=30
+max_volatility = st.sidebar.slider(
+    "Maximum 30D Volatility %",
+    min_value=0.0,
+    max_value=float(max(df["volatility_30d_pct"].max(), 1)),
+    value=float(max(df["volatility_30d_pct"].max(), 1))
 )
-
-min_volume = st.sidebar.number_input(
-    "Minimum 30D Average Volume",
-    min_value=0,
-    value=500_000,
-    step=100_000
-)
-
 
 filtered_df = df[
-    (df["growth_score"] >= min_score) &
-    (df["latest_price"] <= max_price) &
-    (df["avg_volume_30d"] >= min_volume)
+    (df["setup_type"].isin(setup_filter)) &
+    (df["decision"].isin(decision_filter)) &
+    (df["setup_score"] >= min_score) &
+    (df["volatility_30d_pct"] <= max_volatility)
 ].copy()
 
 
-# Summary cards
+# =========================
+# TOP METRICS
+# =========================
+
 col1, col2, col3, col4 = st.columns(4)
 
-col1.metric("Stocks Loaded", len(df))
-col2.metric("Stocks After Filter", len(filtered_df))
+with col1:
+    st.metric("Stocks Screened", len(df))
 
-if not filtered_df.empty:
-    col3.metric("Top Score", filtered_df["growth_score"].max())
-    col4.metric("Average Price", round(filtered_df["latest_price"].mean(), 2))
-else:
-    col3.metric("Top Score", "N/A")
-    col4.metric("Average Price", "N/A")
+with col2:
+    st.metric("Filtered Results", len(filtered_df))
 
+with col3:
+    strong_watch_count = len(filtered_df[filtered_df["decision"] == "Strong Watch"])
+    st.metric("Strong Watch", strong_watch_count)
+
+with col4:
+    reversal_count = len(filtered_df[filtered_df["setup_type"] == "Reversal"])
+    st.metric("Reversal Setups", reversal_count)
+
+
+# =========================
+# MAIN TABLE
+# =========================
 
 st.subheader("Ranked Candidates")
 
+display_columns = [
+    "ticker",
+    "latest_price",
+    "setup_score",
+    "growth_score",
+    "reversal_score",
+    "setup_label",
+    "decision_label",
+    "return_30d_pct",
+    "volume_spike",
+    "volatility_30d_pct",
+    "rsi_14",
+    "reason",
+    "risk_note"
+]
+
+display_df = filtered_df[display_columns].copy()
+
+display_df = display_df.rename(columns={
+    "ticker": "Ticker",
+    "latest_price": "Price",
+    "setup_score": "Setup Score",
+    "growth_score": "Momentum Score",
+    "reversal_score": "Reversal Score",
+    "setup_label": "Setup Type",
+    "decision_label": "Decision",
+    "return_30d_pct": "30D Return %",
+    "volume_spike": "Volume Spike",
+    "volatility_30d_pct": "30D Volatility %",
+    "rsi_14": "RSI 14",
+    "reason": "Reason",
+    "risk_note": "Risk Note"
+})
+
+st.dataframe(
+    display_df,
+    use_container_width=True,
+    hide_index=True
+)
+
+
+# =========================
+# TOP CANDIDATE CARD
+# =========================
+
+st.subheader("Top Candidate")
+
 if filtered_df.empty:
-    st.error("No stocks match your filters.")
+    st.warning("No stocks match the selected filters.")
 else:
-    filtered_df = filtered_df.sort_values(by="growth_score", ascending=False)
+    top = filtered_df.iloc[0]
 
-    st.dataframe(
-        filtered_df[display_columns],
-        use_container_width=True,
-        hide_index=True
+    c1, c2, c3 = st.columns([1, 1, 2])
+
+    with c1:
+        st.metric("Ticker", top["ticker"])
+        st.metric("Price", f"${top['latest_price']:.2f}")
+
+    with c2:
+        st.metric("Setup Score", f"{top['setup_score']:.2f}")
+        st.metric("Setup Type", style_setup_type(top["setup_type"]))
+
+    with c3:
+        st.write(f"**Decision:** {style_decision(top['decision'])}")
+        st.write(f"**Reason:** {top['reason']}")
+        st.write(f"**Risk:** {top['risk_note']}")
+
+
+# =========================
+# CHARTS
+# =========================
+
+st.subheader("Score Comparison")
+
+if not filtered_df.empty:
+    score_chart_df = filtered_df.sort_values(by="setup_score", ascending=False)
+
+    fig = px.bar(
+        score_chart_df,
+        x="ticker",
+        y=["growth_score", "reversal_score", "setup_score"],
+        barmode="group",
+        title="Momentum Score vs Reversal Score vs Setup Score"
     )
 
+    st.plotly_chart(fig, use_container_width=True)
 
-st.subheader("Top 5 Candidates")
 
-top_5 = filtered_df.head(5)
+st.subheader("Risk vs Return Map")
 
-if not top_5.empty:
-    st.table(
-        top_5[
-            [
-                "ticker",
-                "latest_price",
-                "return_30d_pct",
-                "avg_volume_30d",
-                "volume_spike",
-                "volatility_30d_pct",
-                "growth_score"
-            ]
-        ]
-    )
-else:
-    st.info("No top candidates available.")
-
-st.subheader("Price Chart")
-
-available_tickers = filtered_df["ticker"].dropna().unique().tolist()
-
-if not available_tickers:
-    st.info("No tickers available for charting.")
-else:
-    selected_ticker = st.selectbox(
-        "Select a ticker to view price chart",
-        available_tickers
+if not filtered_df.empty:
+    fig2 = px.scatter(
+        filtered_df,
+        x="volatility_30d_pct",
+        y="return_30d_pct",
+        size="setup_score",
+        color="setup_type",
+        hover_name="ticker",
+        title="30D Return vs 30D Volatility",
+        labels={
+            "volatility_30d_pct": "30D Volatility %",
+            "return_30d_pct": "30D Return %",
+            "setup_score": "Setup Score",
+            "setup_type": "Setup Type"
+        }
     )
 
-    price_history = get_price_history(selected_ticker)
+    st.plotly_chart(fig2, use_container_width=True)
 
-    if price_history is None:
-        st.error(f"No price history found for {selected_ticker}.")
-    else:
-        st.write(f"6-month price chart for {selected_ticker}")
 
-        chart_df = price_history[["Date", "Close"]].copy()
-        chart_df = chart_df.set_index("Date")
+# =========================
+# SETUP BREAKDOWN
+# =========================
 
-        st.line_chart(chart_df)
+st.subheader("Setup Type Breakdown")
 
-latest_price = price_history["Close"].iloc[-1]
-price_30d_ago = price_history["Close"].iloc[-30] if len(price_history) >= 30 else None
+setup_counts = filtered_df["setup_type"].value_counts().reset_index()
+setup_counts.columns = ["Setup Type", "Count"]
 
-high_30d = price_history["Close"].tail(30).max()
-low_30d = price_history["Close"].tail(30).min()
+fig3 = px.pie(
+    setup_counts,
+    names="Setup Type",
+    values="Count",
+    title="Momentum vs Reversal vs Neutral"
+)
 
-if price_30d_ago:
-    return_30d = ((latest_price / price_30d_ago) - 1) * 100
-else:
-    return_30d = 0
+st.plotly_chart(fig3, use_container_width=True)
 
-metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
 
-metric_col1.metric("Latest Price", f"${latest_price:.2f}")
-metric_col2.metric("30D Return", f"{return_30d:.2f}%")
-metric_col3.metric("30D High", f"${high_30d:.2f}")
-metric_col4.metric("30D Low", f"${low_30d:.2f}")
+# =========================
+# DOWNLOAD
+# =========================
+
+st.subheader("Download Results")
+
+csv = filtered_df.to_csv(index=False).encode("utf-8")
+
+st.download_button(
+    label="Download Filtered CSV",
+    data=csv,
+    file_name="filtered_quant_screener_results.csv",
+    mime="text/csv"
+)
