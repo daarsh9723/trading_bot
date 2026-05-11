@@ -179,10 +179,23 @@ def run_backtest():
         "growth_score"
     ])
 
+    results["score_decile"] = pd.qcut(
+        results["growth_score"],
+        10,
+        labels=False,
+        duplicates="drop"
+    )
+
     summary = results.groupby("decision").agg(
         signals=("future_return_30d", "count"),
+
         avg_future_return_30d=("future_return_30d", "mean"),
+        median_future_return_30d=("future_return_30d", "median"),
+
         win_rate=("future_return_30d", lambda x: (x > 0).mean() * 100),
+        beat_5pct_rate=("future_return_30d", lambda x: (x > 5).mean() * 100),
+        beat_10pct_rate=("future_return_30d", lambda x: (x > 10).mean() * 100),
+
         max_loss=("future_return_30d", "min"),
         max_gain=("future_return_30d", "max"),
         avg_score=("growth_score", "mean")
@@ -192,6 +205,20 @@ def run_backtest():
 
     output_dir = Path("data")
     output_dir.mkdir(exist_ok=True)
+
+    decile_summary = results.groupby("score_decile").agg(
+        signals=("future_return_30d", "count"),
+        avg_future_return_30d=("future_return_30d", "mean"),
+        median_future_return_30d=("future_return_30d", "median"),
+        win_rate=("future_return_30d", lambda x: (x > 0).mean() * 100),
+        beat_5pct_rate=("future_return_30d", lambda x: (x > 5).mean() * 100),
+        avg_score=("growth_score", "mean")
+    ).reset_index()
+
+    decile_summary.to_csv(
+        output_dir / "scoring_model_decile_summary.csv",
+        index=False
+    )
 
     results.to_csv(output_dir / "historical_scoring_backtest.csv", index=True)
     summary.to_csv(output_dir / "scoring_model_backtest_summary.csv", index=False)
