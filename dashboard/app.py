@@ -43,15 +43,17 @@ display_columns = [
     "ticker",
     "latest_price",
     "return_30d_pct",
-    "avg_volume_30d",
-    "volume_spike",
-    "volatility_30d_pct",
+    "sma_20",
+    "sma_50",
+    "rsi_14",
+    "technical_score",
     "momentum_score",
     "volume_score",
-    "price_score",
     "risk_score",
     "growth_score",
     "decision",
+    "reason",
+    "risk_note",
 ]
 
 
