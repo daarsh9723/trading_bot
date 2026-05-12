@@ -297,22 +297,15 @@ def calculate_score(row: pd.Series) -> pd.Series:
 
     volume_score = clamp(volume_score)
 
-    # 3. Price Opportunity Score
-    # Stocks below $30 qualify, but very low-priced stocks are riskier.
+    # 3. Price Score
+    # Flat — price level alone is not an edge signal.
+    # Very low-priced stocks are flagged in risk_note instead.
     price = row["latest_price"]
 
     if price <= 0:
         price_score = 0
-    elif price < 5:
-        price_score = 40
-    elif price < 10:
-        price_score = 75
-    elif price < 20:
-        price_score = 90
-    elif price < 30:
-        price_score = 80
     else:
-        price_score = 0
+        price_score = 50
 
     # 4. Risk Score
     # Lower volatility gets better score.
@@ -482,9 +475,6 @@ def run_screener():
     if df.empty:
         print("No data found.")
         return
-
-    # Filter stocks below $50
-    df = df[df["latest_price"] < 50].copy()
 
     # Score stocks
     score_columns = df.apply(calculate_score, axis=1)

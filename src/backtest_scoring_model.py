@@ -121,20 +121,14 @@ def calculate_setup_scores(row: pd.Series) -> pd.Series:
     volume_score = clamp(volume_score)
 
     # 3. Price score
+    # Flat — price level alone is not an edge signal.
+    # Very low-priced stocks are flagged in risk_note instead.
     price = row["latest_price"]
 
     if price <= 0:
         price_score = 0
-    elif price < 5:
-        price_score = 40
-    elif price < 10:
-        price_score = 75
-    elif price < 20:
-        price_score = 90
-    elif price < 30:
-        price_score = 80
     else:
-        price_score = 0
+        price_score = 50
 
     # 4. Risk score
     volatility = row["volatility_30d_pct"]
